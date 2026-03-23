@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+neo4j
+chromadb
+openai
+anthropic
+tiktoken
+ragas
+python-dotenv
+requests
+gitpython
+tree-sitter>=0.21.0
+tree-sitter-python
+tree-sitter-javascript
+tree-sitter-typescript
+networkx
+pygments

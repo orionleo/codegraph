@@ -1,0 +1,1237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CodeGraph — GraphRAG for Codebase Understanding</title>
+    <meta name="description" content="CodeGraph: A production-ready GraphRAG system that parses source code into a Neo4j knowledge graph for multi-hop natural language queries.">
+
+    <!-- D3.js for graph visualization -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <!-- highlight.js for syntax highlighting -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <!-- Marked for markdown rendering -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <style>
+        /* ================================================================
+           DESIGN SYSTEM — CodeGraph Dark Theme
+           ================================================================ */
+        :root {
+            --bg-primary: #0a0e17;
+            --bg-secondary: #111827;
+            --bg-tertiary: #1a2332;
+            --bg-card: #151d2e;
+            --bg-input: #0d1321;
+            --border: #1e293b;
+            --border-focus: #3b82f6;
+
+            --text-primary: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+
+            --accent-blue: #3b82f6;
+            --accent-purple: #8b5cf6;
+            --accent-cyan: #06b6d4;
+            --accent-green: #10b981;
+            --accent-amber: #f59e0b;
+            --accent-red: #ef4444;
+            --accent-pink: #ec4899;
+
+            --gradient-primary: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+            --gradient-glass: linear-gradient(135deg, rgba(59,130,246,0.08) 0%, rgba(139,92,246,0.04) 100%);
+
+            --shadow-sm: 0 1px 3px rgba(0,0,0,0.4);
+            --shadow-md: 0 4px 12px rgba(0,0,0,0.5);
+            --shadow-lg: 0 8px 32px rgba(0,0,0,0.6);
+            --shadow-glow: 0 0 20px rgba(59,130,246,0.15);
+
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 16px;
+            --radius-xl: 20px;
+
+            --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+            --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: var(--font-sans);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* ================================================================
+           BACKGROUND EFFECTS
+           ================================================================ */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background:
+                radial-gradient(ellipse at 20% 0%, rgba(59,130,246,0.08) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 100%, rgba(139,92,246,0.06) 0%, transparent 50%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        /* ================================================================
+           LAYOUT
+           ================================================================ */
+        .app-container {
+            position: relative;
+            z-index: 1;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px 24px;
+        }
+
+        /* ================================================================
+           HEADER
+           ================================================================ */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 24px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .logo-icon {
+            width: 42px;
+            height: 42px;
+            background: var(--gradient-primary);
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            box-shadow: var(--shadow-glow);
+        }
+
+        .app-title {
+            font-size: 22px;
+            font-weight: 700;
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .app-subtitle {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 2px;
+            font-weight: 400;
+        }
+
+        /* ================================================================
+           STATS BAR
+           ================================================================ */
+        .stats-bar {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .stat-chip {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 5px 10px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            font-size: 11px;
+            color: var(--text-secondary);
+            transition: var(--transition);
+        }
+
+        .stat-chip .stat-value {
+            font-weight: 600;
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 11px;
+        }
+
+        .stat-chip.provider {
+            border-color: rgba(59,130,246,0.3);
+            background: rgba(59,130,246,0.08);
+        }
+
+        .stat-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--accent-green);
+            animation: pulse-dot 2s infinite;
+        }
+
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        /* ================================================================
+           INGEST SECTION
+           ================================================================ */
+        .ingest-bar {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .ingest-input {
+            flex: 1;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 12px 16px;
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 13px;
+            outline: none;
+            transition: var(--transition);
+        }
+
+        .ingest-input:focus {
+            border-color: var(--border-focus);
+            box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
+        }
+
+        .ingest-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .btn {
+            padding: 12px 20px;
+            border: none;
+            border-radius: var(--radius-md);
+            font-family: var(--font-sans);
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            white-space: nowrap;
+        }
+
+        .btn-primary {
+            background: var(--gradient-primary);
+            color: white;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-md), var(--shadow-glow);
+        }
+
+        .btn-primary:active { transform: translateY(0); }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-secondary {
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover {
+            background: var(--bg-card);
+            color: var(--text-primary);
+            border-color: var(--border-focus);
+        }
+
+        .btn-secondary.active {
+            background: rgba(59,130,246,0.12);
+            color: var(--accent-blue);
+            border-color: rgba(59,130,246,0.3);
+        }
+
+        /* ================================================================
+           QUERY SECTION
+           ================================================================ */
+        .query-section {
+            margin-bottom: 20px;
+        }
+
+        .query-input-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+
+        .query-input {
+            flex: 1;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 14px 18px;
+            color: var(--text-primary);
+            font-family: var(--font-sans);
+            font-size: 14px;
+            outline: none;
+            transition: var(--transition);
+        }
+
+        .query-input:focus {
+            border-color: var(--accent-purple);
+            box-shadow: 0 0 0 3px rgba(139,92,246,0.15);
+        }
+
+        .query-input::placeholder { color: var(--text-muted); }
+
+        .mode-toggle {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+
+        /* ================================================================
+           BADGES
+           ================================================================ */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .badge-semantic    { background: rgba(6,182,212,0.12);  color: var(--accent-cyan);   border: 1px solid rgba(6,182,212,0.25); }
+        .badge-dependency  { background: rgba(59,130,246,0.12); color: var(--accent-blue);   border: 1px solid rgba(59,130,246,0.25); }
+        .badge-impact      { background: rgba(245,158,11,0.12); color: var(--accent-amber);  border: 1px solid rgba(245,158,11,0.25); }
+        .badge-definition  { background: rgba(16,185,129,0.12); color: var(--accent-green);  border: 1px solid rgba(16,185,129,0.25); }
+
+        .badge-confidence-high   { background: rgba(16,185,129,0.12); color: var(--accent-green);  border: 1px solid rgba(16,185,129,0.25); }
+        .badge-confidence-medium { background: rgba(245,158,11,0.12); color: var(--accent-amber);  border: 1px solid rgba(245,158,11,0.25); }
+        .badge-confidence-low    { background: rgba(239,68,68,0.12);  color: var(--accent-red);    border: 1px solid rgba(239,68,68,0.25); }
+
+        /* ================================================================
+           THINKING INDICATOR
+           ================================================================ */
+        .thinking-indicator {
+            display: none;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 16px;
+            background: rgba(139,92,246,0.08);
+            border: 1px solid rgba(139,92,246,0.2);
+            border-radius: var(--radius-md);
+            margin-bottom: 14px;
+            font-size: 13px;
+            color: var(--accent-purple);
+        }
+
+        .thinking-indicator.active { display: flex; }
+
+        .thinking-brain {
+            font-size: 18px;
+            animation: pulse-brain 1.5s infinite;
+        }
+
+        @keyframes pulse-brain {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.15); opacity: 0.7; }
+        }
+
+        /* ================================================================
+           ANSWER PANELS
+           ================================================================ */
+        .results-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .results-grid.side-by-side {
+            grid-template-columns: 1fr 1fr;
+        }
+
+        .answer-panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            transition: var(--transition);
+        }
+
+        .answer-panel:hover {
+            border-color: rgba(59,130,246,0.2);
+            box-shadow: var(--shadow-md);
+        }
+
+        .panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 18px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .panel-title {
+            font-size: 13px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .panel-meta {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .panel-body {
+            padding: 18px;
+            min-height: 80px;
+        }
+
+        .panel-body .answer-text {
+            font-size: 14px;
+            line-height: 1.7;
+            color: var(--text-primary);
+        }
+
+        .panel-body .answer-text code {
+            background: var(--bg-tertiary);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--accent-cyan);
+        }
+
+        .panel-body .answer-text pre {
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 12px;
+            margin: 10px 0;
+            overflow-x: auto;
+        }
+
+        .panel-body .answer-text pre code {
+            background: none;
+            padding: 0;
+        }
+
+        .panel-footer {
+            padding: 12px 18px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .sources-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+        }
+
+        .source-tag {
+            padding: 2px 8px;
+            background: var(--bg-tertiary);
+            border-radius: 4px;
+            font-family: var(--font-mono);
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+
+        .cost-estimate {
+            font-size: 11px;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+        }
+
+        /* ================================================================
+           PLACEHOLDER STATE
+           ================================================================ */
+        .placeholder-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 48px 24px;
+            color: var(--text-muted);
+            text-align: center;
+        }
+
+        .placeholder-icon {
+            font-size: 40px;
+            margin-bottom: 12px;
+            opacity: 0.5;
+        }
+
+        .placeholder-text {
+            font-size: 14px;
+            max-width: 400px;
+            line-height: 1.5;
+        }
+
+        /* ================================================================
+           GRAPH VISUALIZATION
+           ================================================================ */
+        .graph-section {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            margin-bottom: 24px;
+        }
+
+        .graph-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 18px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .graph-header-title {
+            font-size: 13px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .graph-controls {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .graph-control-input {
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 6px 10px;
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 12px;
+            width: 180px;
+            outline: none;
+        }
+
+        .graph-control-input:focus {
+            border-color: var(--border-focus);
+        }
+
+        #graph-canvas {
+            width: 100%;
+            height: 340px;
+            background: var(--bg-primary);
+        }
+
+        #graph-canvas svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        .graph-node-label {
+            fill: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 10px;
+            pointer-events: none;
+        }
+
+        .graph-tooltip {
+            position: absolute;
+            padding: 6px 10px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            font-size: 11px;
+            color: var(--text-primary);
+            pointer-events: none;
+            z-index: 100;
+            box-shadow: var(--shadow-md);
+            display: none;
+        }
+
+        /* ================================================================
+           LOADING SPINNER
+           ================================================================ */
+        .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255,255,255,0.2);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading-overlay {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            padding: 40px;
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+
+        .loading-overlay.active { display: flex; }
+
+        /* ================================================================
+           STATUS TOAST
+           ================================================================ */
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            padding: 12px 18px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            font-size: 13px;
+            color: var(--text-primary);
+            box-shadow: var(--shadow-lg);
+            z-index: 1000;
+            transform: translateY(100px);
+            opacity: 0;
+            transition: all 0.3s ease;
+        }
+
+        .toast.show {
+            transform: translateY(0);
+            opacity: 1;
+        }
+
+        .toast.success { border-left: 3px solid var(--accent-green); }
+        .toast.error   { border-left: 3px solid var(--accent-red); }
+        .toast.info    { border-left: 3px solid var(--accent-blue); }
+
+        /* ================================================================
+           RESPONSIVE
+           ================================================================ */
+        @media (max-width: 768px) {
+            .ingest-bar { flex-direction: column; }
+            .query-input-row { flex-direction: column; }
+            .results-grid.side-by-side { grid-template-columns: 1fr; }
+            .header { flex-direction: column; gap: 12px; align-items: flex-start; }
+            .stats-bar { margin-top: 8px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <!-- ============ HEADER ============ -->
+        <header class="header">
+            <div class="header-left">
+                <div class="logo-icon">⟁</div>
+                <div>
+                    <div class="app-title">CodeGraph</div>
+                    <div class="app-subtitle">GraphRAG for Codebase Understanding</div>
+                </div>
+            </div>
+            <div class="stats-bar" id="stats-bar">
+                <div class="stat-chip provider">
+                    <div class="stat-dot" id="health-dot"></div>
+                    <span id="provider-label">Loading...</span>
+                </div>
+                <div class="stat-chip"><span>Files</span> <span class="stat-value" id="stat-files">0</span></div>
+                <div class="stat-chip"><span>Functions</span> <span class="stat-value" id="stat-functions">0</span></div>
+                <div class="stat-chip"><span>Classes</span> <span class="stat-value" id="stat-classes">0</span></div>
+                <div class="stat-chip"><span>Edges</span> <span class="stat-value" id="stat-edges">0</span></div>
+            </div>
+        </header>
+
+        <!-- ============ INGEST ============ -->
+        <div class="ingest-bar">
+            <input type="text" class="ingest-input" id="ingest-input"
+                   placeholder="GitHub URL or local path — e.g. https://github.com/tiangolo/fastapi">
+            <button class="btn btn-primary" id="ingest-btn" onclick="handleIngest()">
+                <span id="ingest-btn-text">⬇ Ingest</span>
+            </button>
+        </div>
+
+        <!-- ============ QUERY ============ -->
+        <div class="query-section">
+            <div class="query-input-row">
+                <input type="text" class="query-input" id="query-input"
+                       placeholder="Ask about the codebase — e.g. What breaks if I change the routing system?"
+                       onkeydown="if(event.key==='Enter') handleQuery()">
+                <div class="mode-toggle">
+                    <button class="btn btn-secondary active" id="mode-graphrag" onclick="setMode('graphrag')">GraphRAG</button>
+                    <button class="btn btn-secondary" id="mode-vanilla" onclick="setMode('vanilla')">Vanilla</button>
+                    <button class="btn btn-secondary" id="mode-compare" onclick="setMode('compare')">Compare</button>
+                </div>
+                <button class="btn btn-primary" id="query-btn" onclick="handleQuery()">
+                    Ask →
+                </button>
+            </div>
+        </div>
+
+        <!-- ============ THINKING INDICATOR ============ -->
+        <div class="thinking-indicator" id="thinking-indicator">
+            <span class="thinking-brain">🧠</span>
+            <span>Adaptive thinking active — Opus 4.6 is reasoning through the codebase graph...</span>
+        </div>
+
+        <!-- ============ ANSWER PANELS ============ -->
+        <div class="results-grid" id="results-grid">
+            <div class="answer-panel" id="graphrag-panel">
+                <div class="panel-header">
+                    <div class="panel-title">
+                        <span>⟁</span> GraphRAG Answer
+                    </div>
+                    <div class="panel-meta" id="graphrag-meta"></div>
+                </div>
+                <div class="panel-body" id="graphrag-body">
+                    <div class="placeholder-state">
+                        <div class="placeholder-icon">🔍</div>
+                        <div class="placeholder-text">
+                            Ingest a repository, then ask a question to see GraphRAG in action.<br>
+                            Try: <em>"What functions call include_router?"</em>
+                        </div>
+                    </div>
+                </div>
+                <div class="panel-footer" id="graphrag-footer" style="display:none">
+                    <div class="sources-list" id="graphrag-sources"></div>
+                    <div class="cost-estimate" id="graphrag-cost"></div>
+                </div>
+            </div>
+
+            <div class="answer-panel" id="vanilla-panel" style="display:none">
+                <div class="panel-header">
+                    <div class="panel-title">
+                        <span>📄</span> Vanilla RAG Answer
+                    </div>
+                    <div class="panel-meta" id="vanilla-meta"></div>
+                </div>
+                <div class="panel-body" id="vanilla-body">
+                    <div class="placeholder-state">
+                        <div class="placeholder-icon">📄</div>
+                        <div class="placeholder-text">Vector search only — no graph context.</div>
+                    </div>
+                </div>
+                <div class="panel-footer" id="vanilla-footer" style="display:none">
+                    <div class="sources-list" id="vanilla-sources"></div>
+                    <div class="cost-estimate" id="vanilla-cost"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============ LOADING ============ -->
+        <div class="loading-overlay" id="query-loading">
+            <div class="spinner"></div>
+            <span>Searching the knowledge graph...</span>
+        </div>
+
+        <!-- ============ GRAPH VISUALIZER ============ -->
+        <div class="graph-section">
+            <div class="graph-header">
+                <div class="graph-header-title">
+                    <span>🕸️</span> Graph Explorer
+                </div>
+                <div class="graph-controls">
+                    <input type="text" class="graph-control-input" id="graph-entity-input"
+                           placeholder="Entity name..." onkeydown="if(event.key==='Enter') exploreGraph()">
+                    <select class="graph-control-input" id="graph-depth" style="width:80px">
+                        <option value="1">1 hop</option>
+                        <option value="2" selected>2 hops</option>
+                        <option value="3">3 hops</option>
+                    </select>
+                    <button class="btn btn-secondary" onclick="exploreGraph()">Explore</button>
+                </div>
+            </div>
+            <div id="graph-canvas"></div>
+        </div>
+    </div>
+
+    <!-- Toast notifications -->
+    <div class="toast" id="toast"></div>
+    <!-- Graph tooltip -->
+    <div class="graph-tooltip" id="graph-tooltip"></div>
+
+    <script>
+        // ================================================================
+        // STATE
+        // ================================================================
+        let currentMode = 'graphrag';
+        const API = '';  // Same origin
+
+        // ================================================================
+        // INITIALIZATION
+        // ================================================================
+        document.addEventListener('DOMContentLoaded', () => {
+            refreshStats();
+            checkHealth();
+        });
+
+        // ================================================================
+        // HEALTH CHECK
+        // ================================================================
+        async function checkHealth() {
+            try {
+                const res = await fetch(`${API}/health`);
+                const data = await res.json();
+                const dot = document.getElementById('health-dot');
+                const label = document.getElementById('provider-label');
+
+                dot.style.background = data.neo4j_connected ? 'var(--accent-green)' : 'var(--accent-red)';
+                label.textContent = `${data.provider || 'unknown'}${data.ollama_available ? ' / ready' : ''}`;
+            } catch (e) {
+                document.getElementById('provider-label').textContent = 'Disconnected';
+                document.getElementById('health-dot').style.background = 'var(--accent-red)';
+            }
+        }
+
+        // ================================================================
+        // STATS
+        // ================================================================
+        async function refreshStats() {
+            try {
+                const res = await fetch(`${API}/graph/stats`);
+                const data = await res.json();
+                document.getElementById('stat-files').textContent = data.total_files || 0;
+                document.getElementById('stat-functions').textContent = data.total_functions || 0;
+                document.getElementById('stat-classes').textContent = data.total_classes || 0;
+                document.getElementById('stat-edges').textContent = data.total_edges || 0;
+            } catch (e) {
+                console.warn('Stats fetch failed:', e);
+            }
+        }
+
+        // ================================================================
+        // MODE TOGGLE
+        // ================================================================
+        function setMode(mode) {
+            currentMode = mode;
+            ['graphrag', 'vanilla', 'compare'].forEach(m => {
+                document.getElementById(`mode-${m}`).classList.toggle('active', m === mode);
+            });
+
+            const grid = document.getElementById('results-grid');
+            const vanillaPanel = document.getElementById('vanilla-panel');
+
+            if (mode === 'compare') {
+                grid.classList.add('side-by-side');
+                vanillaPanel.style.display = '';
+            } else if (mode === 'vanilla') {
+                grid.classList.remove('side-by-side');
+                vanillaPanel.style.display = '';
+                document.getElementById('graphrag-panel').style.display = 'none';
+            } else {
+                grid.classList.remove('side-by-side');
+                vanillaPanel.style.display = 'none';
+                document.getElementById('graphrag-panel').style.display = '';
+            }
+        }
+
+        // ================================================================
+        // INGEST
+        // ================================================================
+        async function handleIngest() {
+            const source = document.getElementById('ingest-input').value.trim();
+            if (!source) return;
+
+            const btn = document.getElementById('ingest-btn');
+            const btnText = document.getElementById('ingest-btn-text');
+            btn.disabled = true;
+            btnText.innerHTML = '<div class="spinner"></div> Ingesting...';
+
+            try {
+                const res = await fetch(`${API}/ingest`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ source })
+                });
+                const data = await res.json();
+
+                if (res.ok) {
+                    showToast(
+                        `✅ Ingested: ${data.files_processed} files, ${data.nodes_created} nodes, `+
+                        `${data.edges_created} edges, ${data.chunks_embedded} chunks `+
+                        `(${data.duration_seconds}s)`,
+                        'success'
+                    );
+                    refreshStats();
+                } else {
+                    showToast(`❌ ${data.detail || 'Ingest failed'}`, 'error');
+                }
+            } catch (e) {
+                showToast(`❌ Network error: ${e.message}`, 'error');
+            } finally {
+                btn.disabled = false;
+                btnText.textContent = '⬇ Ingest';
+            }
+        }
+
+        // ================================================================
+        // QUERY
+        // ================================================================
+        async function handleQuery() {
+            const question = document.getElementById('query-input').value.trim();
+            if (!question) return;
+
+            // Show loading
+            const loading = document.getElementById('query-loading');
+            loading.classList.add('active');
+
+            // Thinking indicator for GraphRAG queries
+            const thinkingEl = document.getElementById('thinking-indicator');
+
+            if (currentMode === 'compare') {
+                // Run both in parallel
+                thinkingEl.classList.add('active');
+                const [graphragResult, vanillaResult] = await Promise.all([
+                    queryAPI(question, 'graphrag'),
+                    queryAPI(question, 'vanilla')
+                ]);
+                thinkingEl.classList.remove('active');
+                loading.classList.remove('active');
+
+                if (graphragResult) renderAnswer('graphrag', graphragResult);
+                if (vanillaResult) renderAnswer('vanilla', vanillaResult);
+            } else {
+                const mode = currentMode;
+                if (mode === 'graphrag') thinkingEl.classList.add('active');
+
+                const result = await queryAPI(question, mode);
+                thinkingEl.classList.remove('active');
+                loading.classList.remove('active');
+
+                if (result) {
+                    renderAnswer(mode === 'vanilla' ? 'vanilla' : 'graphrag', result);
+                    // Auto-explore the entity in the graph
+                    if (result.query_type && mode === 'graphrag') {
+                        const entity = extractEntity(result);
+                        if (entity) {
+                            document.getElementById('graph-entity-input').value = entity;
+                            exploreGraph();
+                        }
+                    }
+                }
+            }
+        }
+
+        async function queryAPI(question, mode) {
+            try {
+                const res = await fetch(`${API}/query`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question, mode })
+                });
+                if (!res.ok) {
+                    const err = await res.json();
+                    showToast(`❌ ${err.detail || 'Query failed'}`, 'error');
+                    return null;
+                }
+                return await res.json();
+            } catch (e) {
+                showToast(`❌ Network error: ${e.message}`, 'error');
+                return null;
+            }
+        }
+
+        function extractEntity(result) {
+            if (result.entity) {
+                return result.entity;
+            }
+            // Try to extract entity from sources or answer
+            if (result.sources && result.sources.length > 0) {
+                const first = result.sources[0];
+                const parts = first.split(':');
+                return parts[parts.length - 1];
+            }
+            return '';
+        }
+
+        // ================================================================
+        // RENDER ANSWER
+        // ================================================================
+        function renderAnswer(panelId, data) {
+            const body = document.getElementById(`${panelId}-body`);
+            const meta = document.getElementById(`${panelId}-meta`);
+            const footer = document.getElementById(`${panelId}-footer`);
+            const sources = document.getElementById(`${panelId}-sources`);
+            const cost = document.getElementById(`${panelId}-cost`);
+
+            // Query type badge
+            const qt = data.query_type || 'semantic';
+            const badgeClass = `badge-${qt}`;
+
+            let metaHtml = `<span class="badge ${badgeClass}">${qt}</span>`;
+
+            // Confidence badge
+            const conf = (data.confidence || 'MEDIUM').toUpperCase();
+            const confClass = `badge-confidence-${conf.toLowerCase()}`;
+            metaHtml += `<span class="badge ${confClass}">${conf}</span>`;
+
+            // Thinking indicator
+            if (data.thinking_used) {
+                metaHtml += `<span class="badge" style="background:rgba(139,92,246,0.12);color:var(--accent-purple);border:1px solid rgba(139,92,246,0.25)">🧠 Thinking</span>`;
+            }
+
+            meta.innerHTML = metaHtml;
+
+            // Render answer with markdown
+            const rawAnswer = data.answer || 'No answer generated.';
+            body.innerHTML = `<div class="answer-text">${renderMarkdown(rawAnswer)}</div>`;
+
+            // Highlight code blocks
+            body.querySelectorAll('pre code').forEach(block => hljs.highlightElement(block));
+
+            // Footer
+            footer.style.display = 'flex';
+
+            // Sources
+            const srcList = data.sources || [];
+            sources.innerHTML = srcList.length
+                ? srcList.map(s => `<span class="source-tag">${escapeHtml(s)}</span>`).join('')
+                : '<span style="color:var(--text-muted);font-size:11px">No sources</span>';
+
+            // Cost estimate
+            const tokens = data.estimated_tokens || 0;
+            const inputCost = (tokens * 15) / 1000000;  // $15/MTok input
+            const outputCost = (tokens * 75) / 1000000;  // $75/MTok output roughly
+            const totalCost = inputCost + outputCost;
+            const hits = data.vector_hits_used || 0;
+            const triples = data.graph_triples_used || 0;
+            cost.textContent = `~$${totalCost.toFixed(4)} | ${hits} vector hits, ${triples} graph triples | ~${tokens} tokens`;
+        }
+
+        function renderMarkdown(text) {
+            try {
+                return marked.parse(text, { breaks: true });
+            } catch (e) {
+                return `<p>${escapeHtml(text)}</p>`;
+            }
+        }
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        // ================================================================
+        // GRAPH EXPLORER
+        // ================================================================
+        async function exploreGraph() {
+            const entity = document.getElementById('graph-entity-input').value.trim();
+            if (!entity) return;
+
+            const depth = parseInt(document.getElementById('graph-depth').value) || 2;
+
+            try {
+                const res = await fetch(`${API}/graph/explore?entity=${encodeURIComponent(entity)}&depth=${depth}`);
+                const data = await res.json();
+
+                if (data.nodes && data.nodes.length > 0) {
+                    renderGraph(data);
+                } else {
+                    showToast(`No graph data found for "${entity}"`, 'info');
+                }
+            } catch (e) {
+                showToast(`Graph explore failed: ${e.message}`, 'error');
+            }
+        }
+
+        function renderGraph(data) {
+            const container = document.getElementById('graph-canvas');
+            container.innerHTML = '';
+
+            const width = container.clientWidth;
+            const height = container.clientHeight || 340;
+
+            const svg = d3.select(container)
+                .append('svg')
+                .attr('width', width)
+                .attr('height', height);
+
+            // Node color by type
+            const colorMap = {
+                'Function': '#3b82f6',
+                'Class': '#8b5cf6',
+                'File': '#10b981',
+            };
+
+            // Build node/link index
+            const nodeIndex = {};
+            data.nodes.forEach(n => { nodeIndex[n.id] = n; });
+
+            const links = data.edges
+                .filter(e => nodeIndex[e.source] && nodeIndex[e.target])
+                .map(e => ({
+                    source: e.source,
+                    target: e.target,
+                    relation: e.type || ''
+                }));
+
+            const simulation = d3.forceSimulation(data.nodes)
+                .force('link', d3.forceLink(links).id(d => d.id).distance(80))
+                .force('charge', d3.forceManyBody().strength(-200))
+                .force('center', d3.forceCenter(width / 2, height / 2))
+                .force('collision', d3.forceCollide().radius(30));
+
+            // Arrow markers
+            svg.append('defs').selectAll('marker')
+                .data(['end'])
+                .enter().append('marker')
+                .attr('id', 'arrow')
+                .attr('viewBox', '0 -5 10 10')
+                .attr('refX', 20)
+                .attr('refY', 0)
+                .attr('markerWidth', 6)
+                .attr('markerHeight', 6)
+                .attr('orient', 'auto')
+                .append('path')
+                .attr('d', 'M0,-5L10,0L0,5')
+                .attr('fill', '#475569');
+
+            // Links
+            const link = svg.append('g')
+                .selectAll('line')
+                .data(links)
+                .enter().append('line')
+                .attr('stroke', '#334155')
+                .attr('stroke-width', 1.5)
+                .attr('marker-end', 'url(#arrow)');
+
+            // Edge labels
+            const edgeLabel = svg.append('g')
+                .selectAll('text')
+                .data(links)
+                .enter().append('text')
+                .text(d => d.relation)
+                .attr('fill', '#64748b')
+                .attr('font-size', '8px')
+                .attr('font-family', 'var(--font-mono)')
+                .attr('text-anchor', 'middle');
+
+            // Nodes
+            const node = svg.append('g')
+                .selectAll('circle')
+                .data(data.nodes)
+                .enter().append('circle')
+                .attr('r', d => d.type === 'File' ? 8 : 6)
+                .attr('fill', d => colorMap[d.type] || '#64748b')
+                .attr('stroke', '#0a0e17')
+                .attr('stroke-width', 2)
+                .style('cursor', 'pointer')
+                .call(d3.drag()
+                    .on('start', dragStarted)
+                    .on('drag', dragged)
+                    .on('end', dragEnded));
+
+            // Node labels
+            const label = svg.append('g')
+                .selectAll('text')
+                .data(data.nodes)
+                .enter().append('text')
+                .text(d => {
+                    const text = d.label || d.name || d.id || '';
+                    return text.length > 20 ? text.slice(0, 20) + '…' : text;
+                })
+                .attr('class', 'graph-node-label')
+                .attr('dx', 12)
+                .attr('dy', 4);
+
+            // Tooltip
+            const tooltip = document.getElementById('graph-tooltip');
+            node.on('mouseover', (event, d) => {
+                tooltip.style.display = 'block';
+                const label = d.label || d.name || d.id || 'unknown';
+                tooltip.innerHTML = `<strong>${label}</strong><br>${d.type}${d.file_path ? '<br>' + d.file_path : ''}`;
+                tooltip.style.left = event.pageX + 12 + 'px';
+                tooltip.style.top = event.pageY - 10 + 'px';
+            }).on('mouseout', () => {
+                tooltip.style.display = 'none';
+            });
+
+            simulation.on('tick', () => {
+                link
+                    .attr('x1', d => d.source.x)
+                    .attr('y1', d => d.source.y)
+                    .attr('x2', d => d.target.x)
+                    .attr('y2', d => d.target.y);
+
+                edgeLabel
+                    .attr('x', d => (d.source.x + d.target.x) / 2)
+                    .attr('y', d => (d.source.y + d.target.y) / 2);
+
+                node
+                    .attr('cx', d => d.x = Math.max(10, Math.min(width - 10, d.x)))
+                    .attr('cy', d => d.y = Math.max(10, Math.min(height - 10, d.y)));
+
+                label
+                    .attr('x', d => d.x)
+                    .attr('y', d => d.y);
+            });
+
+            function dragStarted(event, d) {
+                if (!event.active) simulation.alphaTarget(0.3).restart();
+                d.fx = d.x;
+                d.fy = d.y;
+            }
+
+            function dragged(event, d) {
+                d.fx = event.x;
+                d.fy = event.y;
+            }
+
+            function dragEnded(event, d) {
+                if (!event.active) simulation.alphaTarget(0);
+                d.fx = null;
+                d.fy = null;
+            }
+        }
+
+        // ================================================================
+        // TOAST
+        // ================================================================
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = `toast ${type} show`;
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 5000);
+        }
+    </script>
+</body>
+</html>

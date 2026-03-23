@@ -1,0 +1,242 @@
+[
+  {
+    "question": "How does merge_hybrid_context work?",
+    "ground_truth": "merge_hybrid_context runs vector_search and graph_search in parallel using asyncio, merges the results with weights determined by the query classifier, and returns a combined context string with metadata about hit counts.",
+    "query_type": "semantic",
+    "entity": "merge_hybrid_context"
+  },
+  {
+    "question": "How does the query classifier decide retrieval weights?",
+    "ground_truth": "The query classifier uses an LLM call to classify the question into one of four types: semantic, dependency, impact, or definition. Each type maps to a vector/graph weight ratio: semantic 80/20, dependency 20/80, impact 10/90, definition 0/100.",
+    "query_type": "semantic",
+    "entity": "query_classifier"
+  },
+  {
+    "question": "How does code_parser extract function calls?",
+    "ground_truth": "code_parser uses tree-sitter to walk the AST looking for call_expression and attribute nodes, resolves names to exact matches first then fuzzy matches, and stores unresolved calls as plain strings for the graph builder to handle.",
+    "query_type": "semantic",
+    "entity": "code_parser"
+  },
+  {
+    "question": "How does the embedder decide what to chunk?",
+    "ground_truth": "The embedder chunks by semantic unit: each function body is one chunk, each class with name, docstring, and method signatures is one chunk, and each file gets one LLM-generated summary chunk.",
+    "query_type": "semantic",
+    "entity": "embedder"
+  },
+  {
+    "question": "How does graph_builder handle forward references?",
+    "ground_truth": "graph_builder uses a two-pass strategy: the first pass writes all nodes, and the second pass creates all edges after all nodes exist, avoiding missing-node errors on forward references.",
+    "query_type": "semantic",
+    "entity": "graph_builder"
+  },
+  {
+    "question": "How does repo_loader filter files?",
+    "ground_truth": "repo_loader filters files by extension (.py, .js, .ts, .jsx, .tsx, .go, .java) and skips directories including node_modules, __pycache__, .git, dist, build, and venv.",
+    "query_type": "semantic",
+    "entity": "repo_loader"
+  },
+  {
+    "question": "How does diff_updater perform incremental updates?",
+    "ground_truth": "diff_updater accepts a changed file path, deletes all Neo4j nodes with that file_path using DETACH DELETE, removes matching ChromaDB entries, then re-runs code_parser, graph_builder, and embedder for only that file.",
+    "query_type": "semantic",
+    "entity": "diff_updater"
+  },
+  {
+    "question": "How does the generator format its response?",
+    "ground_truth": "The generator returns a dict containing answer, confidence (HIGH, MEDIUM, or LOW), sources as a list of file_path:function_name strings, query_type, vector_hits_used, graph_triples_used, and estimated_tokens.",
+    "query_type": "semantic",
+    "entity": "generator"
+  },
+  {
+    "question": "How does the LLM provider abstraction work?",
+    "ground_truth": "All LLM calls go through a single llm_call function and all embedding calls go through a single embed function. Switching providers only requires changing the LLM_PROVIDER environment variable with no code changes.",
+    "query_type": "semantic",
+    "entity": "llm_call"
+  },
+  {
+    "question": "How does vector_search retrieve results?",
+    "ground_truth": "vector_search embeds the query using the configured provider, queries ChromaDB for the top-k most similar chunks, and returns a list of results with chunk text and metadata including file path and function name.",
+    "query_type": "semantic",
+    "entity": "vector_search"
+  },
+  {
+    "question": "What functions does merge_hybrid_context call?",
+    "ground_truth": "merge_hybrid_context calls vector_search and graph_search in parallel via asyncio.gather, and calls the query classifier to get retrieval weights before merging results.",
+    "query_type": "dependency",
+    "entity": "merge_hybrid_context"
+  },
+  {
+    "question": "What calls code_parser?",
+    "ground_truth": "code_parser is called by graph_builder and embedder during the ingestion pipeline, after repo_loader returns the list of files to process.",
+    "query_type": "dependency",
+    "entity": "code_parser"
+  },
+  {
+    "question": "What depends on config.py?",
+    "ground_truth": "config.py is imported by embedder, generator, graph_search, vector_search, and query_classifier — any module that needs the LLM provider setting or connection credentials.",
+    "query_type": "dependency",
+    "entity": "config"
+  },
+  {
+    "question": "What does the ingest endpoint depend on?",
+    "ground_truth": "The ingest endpoint in main.py calls repo_loader, then code_parser, then graph_builder and embedder in sequence, returning counts of files processed, nodes created, edges created, and chunks embedded.",
+    "query_type": "dependency",
+    "entity": "ingest"
+  },
+  {
+    "question": "What calls the llm_call function?",
+    "ground_truth": "llm_call is called by query_classifier for query type detection, by generator for answer synthesis, by embedder for file summary generation, and by extractor for entity extraction.",
+    "query_type": "dependency",
+    "entity": "llm_call"
+  },
+  {
+    "question": "What uses the ChromaDB collection?",
+    "ground_truth": "ChromaDB is written to by embedder during ingestion and by diff_updater during incremental updates, and read from by vector_search during retrieval.",
+    "query_type": "dependency",
+    "entity": "chromadb"
+  },
+  {
+    "question": "What does diff_updater call internally?",
+    "ground_truth": "diff_updater calls code_parser to re-parse the changed file, graph_builder to write new nodes and edges, and embedder to store new chunk embeddings.",
+    "query_type": "dependency",
+    "entity": "diff_updater"
+  },
+  {
+    "question": "What modules does main.py import?",
+    "ground_truth": "main.py imports repo_loader, code_parser, graph_builder, embedder, diff_updater from pipeline, query_classifier and hybrid_merger from retrieval, and generator from generation.",
+    "query_type": "dependency",
+    "entity": "main"
+  },
+  {
+    "question": "What uses graph_search?",
+    "ground_truth": "graph_search is called by merge_hybrid_context during hybrid retrieval, weighted based on the query type from the classifier.",
+    "query_type": "dependency",
+    "entity": "graph_search"
+  },
+  {
+    "question": "What depends on graph_builder?",
+    "ground_truth": "graph_builder is called by the ingestion pipeline in main.py and by diff_updater for incremental file updates.",
+    "query_type": "dependency",
+    "entity": "graph_builder"
+  },
+  {
+    "question": "What breaks if I change the chunk_id format in embedder?",
+    "ground_truth": "Changing chunk_id format breaks vector_search which queries ChromaDB by chunk_id, diff_updater which deletes entries by file_path metadata, and source references returned in generator output.",
+    "query_type": "impact",
+    "entity": "chunk_id"
+  },
+  {
+    "question": "What is affected if query_classifier returns the wrong type?",
+    "ground_truth": "An incorrect query type causes merge_hybrid_context to apply wrong vector/graph weights, leading to poor context quality which degrades generator answer accuracy and confidence scores.",
+    "query_type": "impact",
+    "entity": "query_classifier"
+  },
+  {
+    "question": "What breaks if Neo4j goes down?",
+    "ground_truth": "If Neo4j goes down, graph_builder cannot write nodes or edges, graph_search returns empty results, diff_updater cannot delete old nodes, and the graph/stats and graph/explore endpoints fail.",
+    "query_type": "impact",
+    "entity": "neo4j"
+  },
+  {
+    "question": "What breaks if the embed function returns wrong dimensions?",
+    "ground_truth": "Wrong embedding dimensions cause ChromaDB to reject inserts during ingestion and make vector_search similarity scores meaningless, breaking semantic retrieval entirely.",
+    "query_type": "impact",
+    "entity": "embed"
+  },
+  {
+    "question": "What is affected if I change the Neo4j graph schema?",
+    "ground_truth": "Changing the graph schema breaks all Cypher templates in graph_search, the constraint creation in graph_builder, the graph/explore endpoint, and the stats query in graph/stats.",
+    "query_type": "impact",
+    "entity": "graph_schema"
+  },
+  {
+    "question": "What breaks if code_parser fails to extract function calls?",
+    "ground_truth": "If code_parser fails to extract calls, graph_builder creates no CALLS edges in Neo4j, making all dependency and impact Cypher queries return empty results and severely degrading graph_search quality.",
+    "query_type": "impact",
+    "entity": "calls_extraction"
+  },
+  {
+    "question": "What is affected if the Ollama server goes offline?",
+    "ground_truth": "If Ollama is offline and LLM_PROVIDER is ollama, embed calls fail breaking ingestion and vector search, llm_call fails breaking query_classifier and generator, and the health endpoint returns ollama_available false.",
+    "query_type": "impact",
+    "entity": "ollama"
+  },
+  {
+    "question": "What breaks if I rename the llm_call function?",
+    "ground_truth": "Renaming llm_call breaks query_classifier, generator, embedder file summary generation, and extractor, since every module that makes LLM API calls goes through this single abstraction.",
+    "query_type": "impact",
+    "entity": "llm_call"
+  },
+  {
+    "question": "What is impacted if repo_loader adds a new file extension?",
+    "ground_truth": "Adding a new extension requires a matching language subclass in code_parser, a new tree-sitter grammar, and potentially new Cypher queries if the language has unique constructs.",
+    "query_type": "impact",
+    "entity": "repo_loader"
+  },
+  {
+    "question": "What breaks if the query endpoint response format changes?",
+    "ground_truth": "Changing the query endpoint response format breaks the frontend index.html which parses answer, confidence, sources, vector_chunks_used, and graph_triples_used fields, and breaks the evaluator which reads answer fields for scoring.",
+    "query_type": "impact",
+    "entity": "query_endpoint"
+  },
+  {
+    "question": "Where is merge_hybrid_context defined?",
+    "ground_truth": "merge_hybrid_context is defined in backend/retrieval/hybrid_merger.py.",
+    "query_type": "definition",
+    "entity": "merge_hybrid_context"
+  },
+  {
+    "question": "Where is the LLM provider configured?",
+    "ground_truth": "The LLM provider is configured in backend/config.py via the LLM_PROVIDER environment variable, defaulting to ollama.",
+    "query_type": "definition",
+    "entity": "LLM_PROVIDER"
+  },
+  {
+    "question": "Where are the Cypher query templates defined?",
+    "ground_truth": "Cypher query templates are defined in backend/retrieval/graph_search.py as a dictionary with keys for dependency, impact, definition, and semantic query types.",
+    "query_type": "definition",
+    "entity": "CYPHER_TEMPLATES"
+  },
+  {
+    "question": "Where is the chunk metadata format defined?",
+    "ground_truth": "Chunk metadata schema is defined in backend/pipeline/embedder.py with fields including chunk_id, type, name, file_path, language, signature, line_start, and line_end.",
+    "query_type": "definition",
+    "entity": "chunk_metadata"
+  },
+  {
+    "question": "Where is the graph schema enforced in Neo4j?",
+    "ground_truth": "Neo4j constraints are created in backend/pipeline/graph_builder.py using CREATE CONSTRAINT IF NOT EXISTS statements for Function.name, Class.name, and File.path.",
+    "query_type": "definition",
+    "entity": "graph_schema"
+  },
+  {
+    "question": "Where is the generator system prompt defined?",
+    "ground_truth": "The generator system prompt is defined in backend/generation/generator.py, instructing the model to answer using only provided context, reference file paths, and end with CONFIDENCE and SOURCES fields.",
+    "query_type": "definition",
+    "entity": "generator_system_prompt"
+  },
+  {
+    "question": "Where is the query type weighting logic defined?",
+    "ground_truth": "Query type weights (semantic 80/20, dependency 20/80, impact 10/90, definition 0/100) are applied in backend/retrieval/hybrid_merger.py based on output from the query classifier.",
+    "query_type": "definition",
+    "entity": "query_weights"
+  },
+  {
+    "question": "Where is the graph/explore endpoint defined?",
+    "ground_truth": "The graph/explore endpoint is a GET endpoint defined in backend/main.py, accepting entity and depth query parameters and returning a subgraph as nodes and edges lists.",
+    "query_type": "definition",
+    "entity": "graph_explore"
+  },
+  {
+    "question": "Where is the file filtering logic defined?",
+    "ground_truth": "Directory skip logic is in backend/pipeline/repo_loader.py, filtering out node_modules, __pycache__, .git, dist, build, and venv during recursive file walking.",
+    "query_type": "definition",
+    "entity": "repo_loader_filter"
+  },
+  {
+    "question": "Where is diff_updater defined?",
+    "ground_truth": "diff_updater is defined in backend/pipeline/diff_updater.py and is also exposed via a POST /update endpoint in backend/main.py.",
+    "query_type": "definition",
+    "entity": "diff_updater"
+  }
+]
