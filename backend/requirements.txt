@@ -15,3 +15,5 @@ tree-sitter-javascript
 tree-sitter-typescript
 networkx
 pygments
+pytest
+pytest-cov

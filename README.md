@@ -235,6 +235,30 @@ python -m uvicorn backend.main:app --reload --app-dir .
 - `GET /graph/explore`
 - `GET /health`
 
+## Test Suite
+
+CodeGraph includes a `pytest` suite that covers deterministic business logic and mocked API behavior without requiring live Neo4j, ChromaDB, Ollama, OpenAI, or Anthropic.
+
+```bash
+pytest
+```
+
+Run with coverage:
+
+```bash
+pytest --cov=backend --cov-report=term-missing
+```
+
+The tests cover:
+
+- repository filtering and ingest cache helpers
+- query classification fallback behavior
+- answer confidence/source extraction
+- semantic chunk construction
+- vector result ranking
+- ingest progress state handling
+- FastAPI route behavior with external services mocked
+
 ## Example Usage
 
 ### Ingest a repo
