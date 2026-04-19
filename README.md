@@ -184,7 +184,7 @@ codegraph/
 
 ## Quick Start
 
-From [/Users/jai/Documents/Projects_AI/codegraph](/Users/jai/Documents/Projects_AI/codegraph):
+From the project root:
 
 ```bash
 python3 -m venv .venv
