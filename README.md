@@ -1,26 +1,162 @@
 # CodeGraph
 
-CodeGraph is a GraphRAG system specialized for codebase understanding. It parses code with tree-sitter, builds a Neo4j graph of symbols/relationships, stores semantic code chunks in ChromaDB, and answers multi-hop code questions.
+CodeGraph is a code-aware GraphRAG system for repository understanding.
 
-No LangChain or LlamaIndex is used.
+Instead of treating a codebase like plain text, it parses source files with `tree-sitter`, builds a Neo4j graph of symbols and relationships, stores semantic code chunks in ChromaDB, and answers engineering questions with a hybrid graph + vector retrieval pipeline.
+
+This project was built to answer the kinds of questions developers actually ask during onboarding, debugging, refactoring, and code reviews:
+
+- Where is this class defined?
+- What calls this function?
+- What breaks if I change this module?
+- How does this component work end to end?
+
+## Why It Stands Out
+
+- Code-aware retrieval, not generic document RAG
+- Explicit graph reasoning over `CALLS`, `CONTAINS`, `DEFINED_IN`, `IMPORTS`, and `INHERITS_FROM`
+- Hybrid retrieval that changes behavior based on query intent
+- FastAPI backend, Neo4j graph layer, Chroma vector layer, single-file frontend
+- Provider switch between local Ollama and cloud models via `.env`
+- Built without LangChain or LlamaIndex
+
+## Demo Snapshot
+
+CodeGraph supports four practical codebase query types:
+
+| Query Type | Example |
+|---|---|
+| `definition` | `Where is Signer defined?` |
+| `semantic` | `How does Signer work?` |
+| `dependency` | `What functions call unsign?` |
+| `impact` | `What breaks if I change Serializer.loads?` |
+
+This makes it a much better fit for real code analysis than vanilla RAG over chunks alone.
 
 ## Architecture
 
 ```text
-Repo ------------------------------> tree-sitter parser -------------> Neo4j graph
-  |                                         |
-  |                                         +-----------------------> ChromaDB vectors
-  |
-Question -> query classifier -> hybrid retriever -> LLM -> answer
+Repository
+   |
+   v
+tree-sitter parsing
+   |
+   +----------------------------+
+   |                            |
+   v                            v
+Neo4j code graph          Chroma semantic index
+   |                            |
+   +------------+---------------+
+                |
+                v
+        Query classifier
+                |
+                v
+   Graph search + Vector search
+                |
+                v
+         Context merger
+                |
+                v
+          Answer generator
 ```
 
-## Directory Structure
+## What It Does
+
+### Ingestion pipeline
+
+CodeGraph can ingest either:
+
+- a local repository path
+- a GitHub repository URL
+
+During ingest it:
+
+1. walks supported source files
+2. parses functions, classes, imports, and callsites with `tree-sitter`
+3. writes graph nodes and edges into Neo4j
+4. embeds semantic code units into ChromaDB
+5. caches repeated ingests of the same unchanged repo
+
+### Graph schema
+
+The graph captures code structure with node types such as:
+
+- `File`
+- `Module`
+- `Class`
+- `Function`
+
+and relationships such as:
+
+- `CALLS`
+- `DEFINED_IN`
+- `CONTAINS`
+- `IMPORTS`
+- `INHERITS_FROM`
+- `BELONGS_TO`
+
+### Query flow
+
+When a user asks a question, CodeGraph:
+
+1. classifies the question type
+2. extracts the main code entity
+3. runs graph and vector retrieval with different weighting
+4. merges the retrieved context
+5. generates a grounded answer with confidence and source references
+
+## Tech Stack
+
+- `FastAPI` for the backend API
+- `Neo4j` for structural code relationships
+- `ChromaDB` for semantic retrieval
+- `tree-sitter` for AST-based code parsing
+- `Ollama`, `OpenAI`, or `Anthropic` for model access
+- plain HTML/CSS/JS frontend with D3-based graph visualization
+
+## Key Engineering Decisions
+
+### 1. AST parsing over regex
+
+Code is structured data. `tree-sitter` provides reliable symbol extraction and call detection, which is much more defensible than regex-based parsing.
+
+### 2. Graph + vectors instead of only one
+
+Vector search is useful for “what does this code do?” style questions.
+Graph traversal is useful for “what calls this?” and “what breaks if I change this?” style questions.
+
+CodeGraph combines both because real codebase understanding needs both.
+
+### 3. Query-aware retrieval
+
+A definition lookup and an impact-analysis question should not use the same retrieval strategy.
+
+CodeGraph routes each query into a retrieval mode tuned for:
+
+- exact lookups
+- semantic explanation
+- dependency tracing
+- impact analysis
+
+### 4. Fast local iteration
+
+The project is designed for practical demoability:
+
+- local Ollama support
+- repo ingest progress reporting
+- graph exploration endpoint
+- incremental file update path
+- cached re-ingest for unchanged repos
+
+## Project Structure
 
 ```text
 codegraph/
 ├── backend/
 │   ├── main.py
 │   ├── config.py
+│   ├── progress.py
 │   ├── pipeline/
 │   │   ├── repo_loader.py
 │   │   ├── code_parser.py
@@ -41,121 +177,111 @@ codegraph/
 ├── frontend/
 │   └── index.html
 ├── data/
-│   └── repos/
+├── evals/
 ├── .env.example
 └── README.md
 ```
 
-## Setup
+## Quick Start
+
+From [/Users/jai/Documents/Projects_AI/codegraph](/Users/jai/Documents/Projects_AI/codegraph):
 
 ```bash
-cd codegraph
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r backend/requirements.txt
 cp .env.example .env
 ```
 
-### Ollama path
+### Local Ollama path
 
 ```bash
-# .env
-# LLM_PROVIDER=ollama
-# OLLAMA_MODEL=llama3.2
-# OLLAMA_EMBED_MODEL=nomic-embed-text
-
 ollama pull llama3.2
 ollama pull nomic-embed-text
 
-docker run -p 7474:7474 -p 7687:7687 -e NEO4J_AUTH=neo4j/password neo4j:latest
-uvicorn backend.main:app --reload --app-dir .
+docker run -p 7474:7474 -p 7687:7687 \
+  -e NEO4J_AUTH=neo4j/password \
+  neo4j:latest
+
+python -m uvicorn backend.main:app \
+  --reload \
+  --app-dir . \
+  --reload-exclude 'data/*' \
+  --reload-exclude 'chroma_db/*'
 ```
 
 ### OpenAI path
 
-```bash
-# .env
-# LLM_PROVIDER=openai
-# OPENAI_API_KEY=sk-...
+Set this in `.env`:
 
-uvicorn backend.main:app --reload --app-dir .
+```env
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-...
 ```
 
-## Ingest a repo
+Then run:
 
 ```bash
-curl -X POST http://localhost:8000/ingest \
-  -H "Content-Type: application/json" \
-  -d '{"source":"https://github.com/tiangolo/fastapi"}'
+python -m uvicorn backend.main:app --reload --app-dir .
 ```
 
-Local path example:
-
-```bash
-curl -X POST http://localhost:8000/ingest \
-  -H "Content-Type: application/json" \
-  -d '{"source":"/absolute/path/to/repo"}'
-```
-
-## Four Query Types
-
-- semantic: `How does authenticate_user work?`
-- dependency: `What functions call authenticate_user?`
-- impact: `What breaks if I change UserRepository?`
-- definition: `Where is LoginController defined?`
-
-## Evaluation
-
-Run the benchmark:
-
-```bash
-python -m backend.evaluation.evaluator
-```
-
-Results are saved to `evals/results.json`.
-
-### Benchmark table
-
-| Query Type  | Metric            | Vanilla RAG | CodeGraph |
-|-------------|-------------------|-------------|-----------|
-| semantic    | faithfulness      | 0.71        | 0.79      |
-| dependency  | answer_relevancy  | 0.48        | 0.83      |
-| impact      | context_recall    | 0.39        | 0.81      |
-| definition  | faithfulness      | 0.61        | 0.94      |
-
-## Why GraphRAG Beats Vanilla RAG for Code
-
-- Dependency tracing improved strongly in evaluation: answer relevancy rose from 0.48 to 0.83 by using graph traversals instead of only semantic chunk matching.
-- Impact analysis improved from 0.39 to 0.81 context recall because multi-hop `CALLS` traversal captures downstream effects that vector-only retrieval misses.
-- Definition lookup improved from 0.61 to 0.94 faithfulness since graph lookup resolves exact symbol definitions with file paths and line numbers.
-
-## API
+## API Surface
 
 - `POST /ingest`
+- `GET /ingest/progress`
 - `POST /query`
 - `POST /update`
 - `GET /graph/stats`
-- `GET /graph/explore?entity=AuthService&depth=2`
+- `GET /graph/explore`
 - `GET /health`
 
-## Demo repos
+## Example Usage
 
-- [FastAPI](https://github.com/tiangolo/fastapi)
-- [Express](https://github.com/expressjs/express)
-- Your own project repo
+### Ingest a repo
+
+```bash
+curl -X POST http://127.0.0.1:8000/ingest \
+  -H "Content-Type: application/json" \
+  -d '{"source":"https://github.com/pallets/itsdangerous"}'
+```
+
+### Query the code graph
+
+```bash
+curl -X POST http://127.0.0.1:8000/query \
+  -H "Content-Type: application/json" \
+  -d '{"question":"Where is Signer defined?","mode":"graphrag"}'
+```
+
+```bash
+curl -X POST http://127.0.0.1:8000/query \
+  -H "Content-Type: application/json" \
+  -d '{"question":"What functions call unsign?","mode":"graphrag"}'
+```
+
+## Good Repos To Demo
+
+- [pallets/itsdangerous](https://github.com/pallets/itsdangerous)
+- [pallets/werkzeug](https://github.com/pallets/werkzeug)
+- [tiangolo/fastapi](https://github.com/tiangolo/fastapi)
+
+## Recruiter-Friendly Summary
+
+If someone scans only one section of this README, the takeaway should be:
+
+> CodeGraph is a full-stack AI systems project that combines AST parsing, graph databases, vector retrieval, API design, and developer tooling into one practical application for codebase understanding.
+
+It demonstrates:
+
+- backend engineering
+- systems integration
+- AI application design
+- retrieval architecture
+- developer-focused product thinking
 
 ## Notes
 
-- All generation calls flow through `llm_call(prompt, system_prompt, provider)`.
-- All embedding calls flow through `embed(text, provider)`.
-- Provider switching only requires changing `LLM_PROVIDER` in `.env`.
-- `diff_updater.py` makes updates production-friendly by re-indexing a single changed file instead of full re-ingest.
-
-## Checklist
-
-- [ ] Neo4j running (Docker or AuraDB)
-- [ ] Ollama running with `llama3.2` + `nomic-embed-text` pulled
-- [ ] `.env` configured
-- [ ] Run: `POST /ingest` with a GitHub repo URL
-- [ ] Run: `GET /health` to verify all connections
-- [ ] Run: `POST /query` with a test question
-- [ ] Run: `python -m backend.evaluation.evaluator` to get benchmark scores
-# codegraph
+- Re-ingesting the same unchanged repository returns a cached result.
+- Ingest currently prioritizes speed and stability over exhaustive language coverage.
+- Python, JavaScript, and TypeScript are the primary structured parse targets.
+- The project is intentionally framework-light so the retrieval and graph logic stay transparent.
